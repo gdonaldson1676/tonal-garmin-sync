@@ -123,9 +123,8 @@ export class SyncService {
           // repCount is the reps performed; `repetition` is the set number.
           reps: Math.round(set.repCount ?? set.prescribedReps ?? 0),
           weight: onMachine ? (set.baseWeight ?? set.avgWeight) : undefined,
-          volume: set.volume,
-          oneRepMax:
-            onMachine && set.oneRepMax !== undefined ? Math.round(set.oneRepMax * 10) / 10 : undefined,
+          volume: round1(set.volume),
+          oneRepMax: onMachine ? round1(set.oneRepMax) : undefined,
         });
       }
     }
@@ -271,6 +270,11 @@ export class SyncService {
       setCount: workout.sets.length,
     };
   }
+}
+
+/** One decimal place; Tonal's floats carry noise like 335.3999996. */
+function round1(n: number | undefined): number | undefined {
+  return n === undefined ? undefined : Math.round(n * 10) / 10;
 }
 
 /** The workout's date where it was done (Tonal's timeZone), falling back to UTC. */

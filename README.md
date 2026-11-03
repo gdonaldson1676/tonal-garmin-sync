@@ -126,7 +126,7 @@ that can get through Garmin's WAF and MFA.
 
 ```
 src/
-  server.ts     webhook (/sync, /health) + optional polling loop
+  server.ts     webhook (/sync, /sets, /health) + optional polling loop
   sync.ts       orchestration: fetch → dedup → detail → FIT → upload → record
   tonal.ts      ts-tonal-client wrapper + the raw per-set detail call
   garmin.ts     shells out to the Python uploader; token-store handling
@@ -148,6 +148,11 @@ python/
 - `POST /sync` — requires the `x-webhook-secret` header. Runs one sync.
   Returns `{ status, activityId, name, setCount }` where status is
   `synced` · `skipped` · `duplicate` · `no-activity`.
+- `GET /sets?since=YYYY-MM-DD` — requires the `x-webhook-secret` header.
+  Read-only: every performed set (`date, workout, exercise, set, side, reps,
+  weight, volume, oneRepMax, activityId`) of every workout on or after `since`,
+  oldest first. Omit `since` for your whole history (a few minutes). Weights are
+  in `TONAL_WEIGHT_UNIT`.
 - `GET /health` — liveness, no auth.
 
 ## Limitations and risks

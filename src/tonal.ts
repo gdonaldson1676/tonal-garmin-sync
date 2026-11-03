@@ -39,18 +39,37 @@ export class Tonal {
   }
 
   /** Reach the library's internal authenticated HTTP client. See class doc. */
-  private rawRequest<T>(endpoint: string): Promise<T> {
+  private rawRequest<T>(endpoint: string, headers?: Record<string, string>): Promise<T> {
     const http = (this.client as unknown as { httpClient: InternalHttpClient }).httpClient;
     if (!http || typeof http.request !== 'function') {
       throw new Error(
         'ts-tonal-client internal httpClient is unavailable — the library layout changed; update Tonal.rawRequest().',
       );
     }
-    return http.request<T>(endpoint, { method: 'GET' });
+    return http.request<T>(endpoint, { method: 'GET', ...(headers ? { headers } : {}) });
   }
 
+  /** The latest 50 activity summaries — Tonal's default page. */
   async getActivitySummaries(): Promise<TonalActivitySummaryLoose[]> {
     return (await this.client.getActivitySummaries()) as unknown as TonalActivitySummaryLoose[];
+  }
+
+  /**
+   * Every activity summary, ever. Tonal pages this endpoint with the request
+   * headers `pg-offset` / `pg-limit` (query parameters are ignored), which the
+   * library doesn't expose.
+   */
+  async getAllActivitySummaries(): Promise<TonalActivitySummaryLoose[]> {
+    const pageSize = 200;
+    const all: TonalActivitySummaryLoose[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.rawRequest<TonalActivitySummaryLoose[]>(
+        `/users/${this.userId}/activity-summaries`,
+        { 'pg-offset': String(offset), 'pg-limit': String(pageSize) },
+      );
+      all.push(...page);
+      if (page.length < pageSize) return all;
+    }
   }
 
   async getMovements(): Promise<TonalMovementLoose[]> {

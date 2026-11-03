@@ -103,6 +103,22 @@ export interface TonalMovementLoose {
   [key: string]: unknown;
 }
 
+/** One performed set, as GET /sets returns it. Weights are in TONAL_WEIGHT_UNIT. */
+export interface SetHistoryRow {
+  activityId: string;
+  /** workout's local date, YYYY-MM-DD */
+  date: string;
+  workout: string;
+  exercise: string;
+  /** set number within this movement */
+  set?: number;
+  side?: string;
+  reps: number;
+  weight?: number;
+  volume?: number;
+  oneRepMax?: number;
+}
+
 /** Our normalized representation, ready to encode into a FIT file. */
 export interface NormalizedSet {
   index: number;

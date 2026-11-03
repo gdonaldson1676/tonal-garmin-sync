@@ -1,10 +1,10 @@
 import type { Config } from './config.js';
-import { Tonal, activityIdOf, isAuthFailure, isHttpStatus } from './tonal.js';
+import { Tonal, activityIdOf, isAuthFailure, isHttpStatus, isSyncable } from './tonal.js';
 import { Movements } from './movements.js';
 import { Garmin } from './garmin.js';
 import { Store } from './store.js';
 import { encodeFit, normalizeWorkout } from './fit.js';
-import type { TonalActivitySummaryLoose } from './types.js';
+import type { SetHistoryRow, TonalActivitySummaryLoose, TonalSetActivityLoose } from './types.js';
 
 export type SyncStatus = 'synced' | 'duplicate' | 'skipped' | 'no-activity' | 'would-sync' | 'failed';
 
@@ -69,6 +69,68 @@ export class SyncService {
     );
     this.chain = next;
     return next;
+  }
+
+  /**
+   * Every performed set of every completed workout on or after `since`
+   * (YYYY-MM-DD, the workout's local date; omit for all history), oldest first.
+   * Read-only: nothing is uploaded or recorded. Queued like a sync, so a full
+   * history pull never runs alongside an upload on the same Tonal session.
+   */
+  setHistory(since?: string): Promise<SetHistoryRow[]> {
+    const next = this.chain.then(
+      () => this.doSetHistory(since),
+      () => this.doSetHistory(since),
+    );
+    this.chain = next;
+    return next;
+  }
+
+  private async doSetHistory(since?: string): Promise<SetHistoryRow[]> {
+    await this.ensureConnected(false);
+    const summaries = (await this.callTonal(() => this.tonal!.getAllActivitySummaries()))
+      .filter((s) => s.completed !== false && isSyncable(s))
+      .map((s) => ({ s, date: localDate(s) }))
+      .filter(({ date }) => !since || date >= since)
+      .sort((a, b) => String(a.s.timestamp).localeCompare(String(b.s.timestamp)));
+
+    const rows: SetHistoryRow[] = [];
+    for (const { s, date } of summaries) {
+      const activityId = activityIdOf(s);
+      let sets: TonalSetActivityLoose[];
+      try {
+        const detail = await this.callTonal(() => this.tonal!.getWorkoutDetail(activityId));
+        sets = detail.workoutSetActivity ?? detail.sets ?? detail.setActivities ?? [];
+      } catch (err) {
+        if (!isHttpStatus(err, 404)) throw err;
+        console.warn(`[sets] activity ${activityId} has no per-set detail — skipping`);
+        continue;
+      }
+      for (const set of sets) {
+        const movementId = set.movementId ? String(set.movementId) : undefined;
+        const exercise = this.movements!.nameFor(movementId);
+        // Tonal logs rest periods as sets of a movement called "Rest".
+        if (exercise === 'Rest') continue;
+        // Bodyweight moves carry a nominal weight that means nothing (see fit.ts).
+        const onMachine = this.movements!.fitFor(movementId)?.onMachine !== false;
+        rows.push({
+          activityId,
+          date,
+          workout: String(s.name ?? ''),
+          exercise,
+          set: set.repetition,
+          side: set.movementSide,
+          // repCount is the reps performed; `repetition` is the set number.
+          reps: Math.round(set.repCount ?? set.prescribedReps ?? 0),
+          weight: onMachine ? (set.baseWeight ?? set.avgWeight) : undefined,
+          volume: set.volume,
+          oneRepMax:
+            onMachine && set.oneRepMax !== undefined ? Math.round(set.oneRepMax * 10) / 10 : undefined,
+        });
+      }
+    }
+    console.log(`[sets] ${rows.length} sets from ${summaries.length} workouts${since ? ` since ${since}` : ''}`);
+    return rows;
   }
 
   private async ensureConnected(needGarmin: boolean): Promise<void> {
@@ -208,5 +270,16 @@ export class SyncService {
       name: workout.name,
       setCount: workout.sets.length,
     };
+  }
+}
+
+/** The workout's date where it was done (Tonal's timeZone), falling back to UTC. */
+function localDate(s: TonalActivitySummaryLoose): string {
+  const when = new Date(String(s.timestamp ?? s.localTimestamp ?? ''));
+  if (Number.isNaN(when.getTime())) return '';
+  try {
+    return when.toLocaleDateString('en-CA', { timeZone: s.timeZone || 'UTC' });
+  } catch {
+    return when.toISOString().slice(0, 10); // unrecognized timeZone
   }
 }

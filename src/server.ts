@@ -51,6 +51,28 @@ app.post('/sync', async (request, reply) => {
 });
 
 /**
+ * Per-set history for other tools (spreadsheets, dashboards). Read-only.
+ * ?since=YYYY-MM-DD limits it to workouts on or after that date; without it,
+ * every workout is fetched, which takes a few minutes for a long history.
+ */
+app.get('/sets', async (request, reply) => {
+  const provided = request.headers['x-webhook-secret'];
+  if (!secretOk(Array.isArray(provided) ? provided[0] : provided)) {
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  const since = (request.query as { since?: string }).since;
+  if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    return reply.code(400).send({ error: 'since must be YYYY-MM-DD' });
+  }
+  try {
+    return reply.code(200).send(await service.setHistory(since));
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'set history failed', hint: 'see the service logs for details' });
+  }
+});
+
+/**
  * Optional polling loop. Required on iOS, where no app may read another app's
  * notifications and so the Home Assistant trigger cannot exist; useful on
  * Android as a backstop for missed notifications and downtime.
